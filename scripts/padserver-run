@@ -1,0 +1,22 @@
+#!/bin/bash
+# Steam launch option wrapper: padserver-run %command%
+#
+# Runs the phone-gamepad server only while the game is running, so the virtual Xbox
+# pads exist exactly as long as the game does (no phantom controllers in other games).
+# It can be chained with other wrappers:  padserver-run kbd2pad-run %command%
+#
+# Environment:
+#   PADSERVER       path to server.py (default: ../server/server.py next to this script)
+#   PADSERVER_ARGS  extra server arguments, e.g. "--port 9890 --players 1"
+# The server's output goes to $XDG_RUNTIME_DIR/padserver.log.
+SERVER="${PADSERVER:-$(dirname "$(readlink -f "$0")")/../server/server.py}"
+
+# Same scrubbing as kbd2pad-run: Steam's runtime environment must not leak into host Python.
+env -u LD_PRELOAD -u LD_LIBRARY_PATH -u PYTHONPATH -u PYTHONHOME \
+  /usr/bin/python3 "$SERVER" --eager ${PADSERVER_ARGS:-} \
+  >"${XDG_RUNTIME_DIR:-/tmp}/padserver.log" 2>&1 &
+pad_pid=$!
+trap 'kill $pad_pid 2>/dev/null' EXIT
+sleep 1 # let the pads appear before the game starts looking for controllers
+
+"$@"

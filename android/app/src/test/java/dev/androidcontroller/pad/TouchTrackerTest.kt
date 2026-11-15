@@ -2,6 +2,8 @@ package dev.androidcontroller.pad
 
 import androidx.compose.ui.geometry.Offset
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TouchTrackerTest {
@@ -79,5 +81,151 @@ class TouchTrackerTest {
     fun startNeedsAnExactPressNotAnOverlap() {
         val start = button(Btn.START)
         assertEquals(0, buttons(1L to start.center + Offset(start.radius * 1.2f, 0f)))
+    }
+
+    // --- double tap on SHOOT holds it down ---
+
+    private class Clock {
+        var now = 1_000L
+    }
+
+    /** A tracker with a controllable clock and a one-finger helper for the SHOOT and JUMP buttons. */
+    private inner class Pad {
+        val clock = Clock()
+        val tracker = TouchTracker(layout) { clock.now }
+        val shoot = button(Btn.X).center
+        val jump = button(Btn.A).center
+
+        fun press(at: Offset): Int = tracker.update(mapOf(1L to at)).buttons
+
+        fun lift(): Int = tracker.update(emptyMap()).buttons
+
+        fun advance(ms: Long) {
+            clock.now += ms
+        }
+
+        /** Press and release SHOOT, lasting [pressMs]; returns the state while it is down. */
+        fun tap(pressMs: Long = 80): Int {
+            val down = press(shoot)
+            advance(pressMs)
+            lift()
+            return down
+        }
+    }
+
+    @Test
+    fun doubleTapOnShootHoldsItAfterTheFingerLifts() {
+        val pad = Pad()
+        pad.tap()
+        pad.advance(100)
+        assertEquals(Btn.X, pad.press(pad.shoot))
+        pad.advance(80)
+        assertEquals(Btn.X, pad.lift())
+        assertTrue(pad.tracker.latched)
+        pad.advance(5_000)
+        assertEquals(Btn.X, pad.lift()) // still held much later
+    }
+
+    @Test
+    fun theFirstTapOfADoubleTapIsAnOrdinaryShot() {
+        val pad = Pad()
+        assertEquals(Btn.X, pad.press(pad.shoot))
+        pad.advance(80)
+        assertEquals(0, pad.lift())
+        assertFalse(pad.tracker.latched)
+    }
+
+    @Test
+    fun aSingleTapNeverHolds() {
+        val pad = Pad()
+        pad.tap()
+        pad.advance(2_000)
+        assertEquals(0, pad.lift())
+        assertFalse(pad.tracker.latched)
+    }
+
+    @Test
+    fun aSlowSecondTapDoesNotHold() {
+        val pad = Pad()
+        pad.tap()
+        pad.advance(TouchTracker.DOUBLE_TAP_MS + 1)
+        pad.tap()
+        assertFalse(pad.tracker.latched)
+        assertEquals(0, pad.lift())
+    }
+
+    @Test
+    fun holdingShootThenPressingAgainDoesNotHold() {
+        val pad = Pad()
+        pad.tap(pressMs = TouchTracker.TAP_MS + 1) // a hold, not a tap
+        pad.advance(100)
+        pad.tap()
+        assertFalse(pad.tracker.latched)
+        assertEquals(0, pad.lift())
+    }
+
+    @Test
+    fun doubleTapAgainReleasesIt() {
+        val pad = Pad()
+        pad.tap(); pad.advance(100); pad.tap()
+        assertTrue(pad.tracker.latched)
+        pad.advance(3_000)
+        pad.tap()
+        pad.advance(100)
+        // the unlocking press: the finger is on SHOOT, so it stays down until the finger lifts
+        assertEquals(Btn.X, pad.press(pad.shoot))
+        assertFalse(pad.tracker.latched)
+        pad.advance(80)
+        assertEquals(0, pad.lift())
+    }
+
+    @Test
+    fun aThirdQuickTapDoesNotUndoTheLock() {
+        val pad = Pad()
+        pad.tap(); pad.advance(100); pad.tap()
+        pad.advance(100)
+        pad.tap()
+        assertTrue(pad.tracker.latched)
+        assertEquals(Btn.X, pad.lift())
+    }
+
+    @Test
+    fun theHeldShootCombinesWithOtherButtons() {
+        val pad = Pad()
+        pad.tap(); pad.advance(100); pad.tap()
+        assertEquals(Btn.X or Btn.A, pad.press(pad.jump)) // jump with the same thumb while shooting
+        assertEquals(Btn.X, pad.lift())
+    }
+
+    @Test
+    fun otherButtonsAreNeverHeld() {
+        val pad = Pad()
+        for (i in 0..1) {
+            pad.press(pad.jump)
+            pad.advance(80)
+            pad.lift()
+            pad.advance(100)
+        }
+        assertFalse(pad.tracker.latched)
+        assertEquals(0, pad.lift())
+    }
+
+    @Test
+    fun resetReleasesTheHold() {
+        val pad = Pad()
+        pad.tap(); pad.advance(100); pad.tap()
+        pad.tracker.reset()
+        assertFalse(pad.tracker.latched)
+        assertEquals(0, pad.lift())
+    }
+
+    @Test
+    fun resetForgetsAHalfFinishedDoubleTap() {
+        val pad = Pad()
+        pad.tap()
+        pad.tracker.reset()
+        pad.advance(100)
+        pad.tap()
+        assertFalse(pad.tracker.latched)
     }
 }

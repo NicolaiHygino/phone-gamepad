@@ -111,9 +111,36 @@ class PadLayout(val width: Float, val height: Float, prefs: LayoutPrefs = Layout
  * to the edge never triggers other buttons. All other fingers press whatever they touch.
  * A finger that lands on a button is always a button finger: buttons win over the D-pad's
  * capture zone, so a large D-pad can never swallow a nearby button.
+ *
+ * SHOOT can be held down hands-free: a double tap latches it on, and the next double tap lets go.
+ * That frees the thumb for JUMP and DASH, which is the hard part of shooting while jumping on a screen.
+ * The first tap must be short, so holding SHOOT, lifting and pressing again never latches by accident,
+ * and the press that toggles the latch cannot also start another double tap.
+ * [clockMs] is only read for that timing and must be monotonic.
  */
-class TouchTracker(private val layout: PadLayout) {
+class TouchTracker(
+    private val layout: PadLayout,
+    private val clockMs: () -> Long = { System.nanoTime() / 1_000_000 },
+) {
     private var dpadPointer = NONE
+
+    /** True while SHOOT is held down by the latch rather than by a finger. */
+    var latched = false
+        private set
+
+    private var shootDown = false
+    private var shootDownAt = 0L
+    private var lastTapEnd = NEVER // when the last short, unconsumed tap on SHOOT ended
+    private var toggledByThisPress = false
+
+    /** Forgets every finger and the latch: everything is released. */
+    fun reset() {
+        dpadPointer = NONE
+        latched = false
+        shootDown = false
+        lastTapEnd = NEVER
+        toggledByThisPress = false
+    }
 
     /** [pointers] maps pointer id -> position for every finger currently down. */
     fun update(pointers: Map<Long, Offset>): PadState {
@@ -131,10 +158,35 @@ class TouchTracker(private val layout: PadLayout) {
                 for (b in layout.buttons) if (b.hits(p)) buttons = buttons or b.bit
             }
         }
-        return PadState(buttons = buttons)
+        trackShootTaps(touched = buttons and LATCH_BIT != 0)
+        return PadState(buttons = if (latched) buttons or LATCH_BIT else buttons)
     }
 
-    private companion object {
-        const val NONE = Long.MIN_VALUE
+    private fun trackShootTaps(touched: Boolean) {
+        if (touched == shootDown) return
+        shootDown = touched
+        val now = clockMs()
+        if (touched) {
+            shootDownAt = now
+            toggledByThisPress = lastTapEnd != NEVER && now - lastTapEnd <= DOUBLE_TAP_MS
+            if (toggledByThisPress) latched = !latched
+            lastTapEnd = NEVER
+        } else if (!toggledByThisPress && now - shootDownAt <= TAP_MS) {
+            lastTapEnd = now
+        }
+    }
+
+    companion object {
+        /** The button that can be latched: SHOOT. */
+        const val LATCH_BIT = Btn.X
+
+        /** A press that lasts longer than this is a hold, not a tap. */
+        const val TAP_MS = 250L
+
+        /** Longest gap between lifting after a tap and the press that completes the double tap. */
+        const val DOUBLE_TAP_MS = 300L
+
+        private const val NONE = Long.MIN_VALUE
+        private const val NEVER = Long.MIN_VALUE
     }
 }

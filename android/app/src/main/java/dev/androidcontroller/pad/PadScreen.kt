@@ -55,6 +55,8 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -72,6 +74,7 @@ private const val TICK_MASK = Btn.A or Btn.B or Btn.X or Btn.Y or Btn.LB or Btn.
 fun PadScreen(settings: Settings, onSave: (Settings) -> Unit) {
     var size by remember { mutableStateOf(IntSize.Zero) }
     var pad by remember { mutableStateOf(PadState.NEUTRAL) }
+    var latched by remember { mutableStateOf(false) } // SHOOT is held by a double tap
     var status by remember { mutableStateOf(PadClient.status()) }
     var showSettings by remember { mutableStateOf(settings.host.isBlank()) }
     // Previewed live while the sliders move; reverts to the saved layout if the dialog is cancelled.
@@ -102,6 +105,17 @@ fun PadScreen(settings: Settings, onSave: (Settings) -> Unit) {
         }
         val tracker = remember(layout) { TouchTracker(layout) }
 
+        // A new tracker (the layout changed) or a stop (app in the background) has no fingers and no
+        // latch, so show and send exactly that instead of a stale held SHOOT.
+        fun releaseAll() {
+            tracker.reset()
+            latched = false
+            pad = PadState.NEUTRAL
+            PadClient.update(PadState.NEUTRAL)
+        }
+        LaunchedEffect(tracker) { releaseAll() }
+        LifecycleEventEffect(Lifecycle.Event.ON_STOP) { releaseAll() }
+
         Canvas(
             Modifier
                 .fillMaxSize()
@@ -117,20 +131,29 @@ fun PadScreen(settings: Settings, onSave: (Settings) -> Unit) {
                             val down = HashMap<Long, Offset>()
                             for (c in event.changes) if (c.pressed) down[c.id.value] = c.position
                             val next = tracker.update(down)
+                            val latchChanged = tracker.latched != latched
+                            if (latchChanged) latched = tracker.latched
                             if (next != pad) {
-                                if (next.buttons and pad.buttons.inv() and TICK_MASK != 0) {
+                                if (latchChanged) {
+                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                } else if (next.buttons and pad.buttons.inv() and TICK_MASK != 0) {
                                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                                 }
-                                Log.d(TAG, "buttons=0x%04x fingers=%s".format(next.buttons, down.values))
+                                Log.d(TAG, "buttons=0x%04x latched=%b fingers=%s".format(next.buttons, latched, down.values))
                                 pad = next
                                 PadClient.update(next)
+                            } else if (latchChanged) {
+                                // releasing the latch under a finger that is still down changes no button
+                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                             }
                         }
                     }
                 },
         ) {
             drawDpad(layout, pad.buttons)
-            for (b in layout.buttons) drawButton(b, pad.buttons and b.bit != 0, measurer)
+            for (b in layout.buttons) {
+                drawButton(b, pad.buttons and b.bit != 0, latched && b.bit == TouchTracker.LATCH_BIT, measurer)
+            }
         }
 
         StatusLine(settings, status) { showSettings = true }
@@ -175,9 +198,12 @@ private fun DrawScope.drawDpad(layout: PadLayout, bits: Int) {
     arm(Btn.DPAD_RIGHT, Offset(c.x + inner, c.y - w), Size(len, 2 * w))
 }
 
-private fun DrawScope.drawButton(b: PadButton, pressed: Boolean, measurer: TextMeasurer) {
+private fun DrawScope.drawButton(b: PadButton, pressed: Boolean, held: Boolean, measurer: TextMeasurer) {
     drawCircle(b.color.copy(alpha = if (pressed) 0.95f else 0.18f), radius = b.radius, center = b.center)
     drawCircle(b.color, radius = b.radius, center = b.center, style = Stroke(width = b.radius * 0.07f))
+    if (held) { // a white ring says "held down by the double tap", not "a finger is on it"
+        drawCircle(Color.White, radius = b.radius * 1.14f, center = b.center, style = Stroke(width = b.radius * 0.07f))
+    }
 
     val textColor = if (pressed) Color.Black else Color.White
     val caption = measurer.measure(
@@ -185,7 +211,7 @@ private fun DrawScope.drawButton(b: PadButton, pressed: Boolean, measurer: TextM
         TextStyle(color = textColor, fontSize = (b.radius * 0.42f).toSp(), fontWeight = FontWeight.Bold),
     )
     val label = measurer.measure(
-        b.label,
+        if (held) "HELD" else b.label,
         TextStyle(color = textColor.copy(alpha = 0.75f), fontSize = (b.radius * 0.30f).toSp()),
     )
     val gap = b.radius * 0.05f

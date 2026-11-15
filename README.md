@@ -22,6 +22,8 @@ Xbox 360 controllers, so Steam, Proton and the game treat them like real pads.
 - **Two players**, one phone each. Each phone picks Player 1 or 2.
 - **Touch controls** drawn for landscape: an 8-way D-pad, A/B/X/Y, LB/RB and START, labelled with Cuphead's
   default actions. Real multi-touch, and sliding a finger between two face buttons presses both.
+- **Hands-free shooting:** double-tap SHOOT to hold it down, double-tap again to let go, so one thumb can
+  jump and dash while the game keeps shooting (see [Controls](#controls)).
 - **Low latency.** Phones send their full state on every change plus a 60 Hz heartbeat, and hold a
   low-latency Wi-Fi lock while the app is in front. On a home Wi-Fi network the round trip was about 3 ms
   (median), usually 10-15 ms at worst. The app shows both numbers live.
@@ -93,6 +95,17 @@ developed with.
 | LOCK | RB | lock in place |
 | PAUSE | START | pause |
 | D-pad | D-pad | move and aim, 8 directions |
+
+**Shooting while jumping.** Double-tap SHOOT and it stays held down after you lift your finger: a white
+ring appears around it, its label changes to `HELD`, and the phone buzzes. The thumb is then
+free for JUMP, DASH and EX. Double-tap SHOOT again to let go (the button stays down until you lift the
+finger from that second tap). Details:
+
+- Both taps must be quick: the first press shorter than 250 ms and the second within 300 ms of lifting.
+  Holding SHOOT, lifting and pressing again never latches by accident.
+- A third quick tap does not undo the hold; only a fresh double tap does.
+- Only SHOOT can be held. The hold is dropped when the app goes to the background or the layout is changed
+  in Settings.
 
 The captions follow Cuphead's default Xbox bindings. If you rebind buttons in the game, the labels (in
 `android/.../PadLayout.kt`) will not match, but the Xbox buttons underneath still work.

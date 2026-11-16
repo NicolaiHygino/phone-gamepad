@@ -1,0 +1,5 @@
+# Lets the logged-in user read the Logitech K380 (Bluetooth), so server/keypad.py can grab it.
+# Install:  sudo cp scripts/70-keypad-k380.rules /etc/udev/rules.d/ && sudo udevadm control --reload \
+#           && sudo udevadm trigger --subsystem-match=input
+# For another keyboard, take the vendor:product from `udevadm info -a /dev/input/eventN` (KERNELS=="0005:VVVV:PPPP.*").
+SUBSYSTEM=="input", KERNEL=="event*", KERNELS=="0005:046D:B342.*", TAG+="uaccess"

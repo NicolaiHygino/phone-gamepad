@@ -74,16 +74,32 @@ _AXES = (Btn.DPAD_LEFT | Btn.DPAD_RIGHT, Btn.DPAD_UP | Btn.DPAD_DOWN)
 KEY_UP_EVENT, KEY_DOWN_EVENT, KEY_REPEAT_EVENT = 0, 1, 2
 
 
+LATCH_KEY = KEY_J  # the key that a double tap holds down: shoot
+TAP_S = 0.25  # a press longer than this is a hold, not a tap
+DOUBLE_TAP_S = 0.30  # longest gap between lifting after a tap and the press that completes the double tap
+
+
 class KeyMapper:
     """Held keys -> pad state.
 
     When both directions of an axis are held (A and D, say), the one pressed last wins, and
     letting go of it returns to the other. That keeps a platformer responsive when one finger
     rolls onto the next key before the first lifts.
+
+    Shoot (J) can be held down hands-free, like on the phone: a double tap latches it on and the
+    next double tap lets go. Many keyboards cannot report J together with several other keys at
+    once, so holding J would drop movement keys. The first tap must be short, so holding J,
+    lifting and pressing again never latches by accident, and the press that toggles the latch
+    cannot also start another double tap.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, clock=time.monotonic) -> None:
         self._held: list[int] = []  # mapped keys currently down, oldest first
+        self._clock = clock
+        self.latched = False  # shoot is held by a double tap rather than by the key
+        self._latch_down_at = 0.0
+        self._last_tap_end: float | None = None  # when the last short, unconsumed tap on J ended
+        self._toggled_by_this_press = False
 
     def key(self, code: int, value: int) -> State | None:
         """Feeds one key event; returns the new state, or None if nothing this mapper cares about changed."""
@@ -99,10 +115,25 @@ class KeyMapper:
             self._held.remove(code)
         else:
             return None  # autorepeat
+        if code == LATCH_KEY:
+            self._track_latch_taps(pressed=value == KEY_DOWN_EVENT)
         return self.state()
 
+    def _track_latch_taps(self, pressed: bool) -> None:
+        now = self._clock()
+        if pressed:
+            self._latch_down_at = now
+            last = self._last_tap_end
+            self._toggled_by_this_press = last is not None and now - last <= DOUBLE_TAP_S
+            if self._toggled_by_this_press:
+                self.latched = not self.latched
+                log.info("shoot %s", "held" if self.latched else "released")
+            self._last_tap_end = None
+        elif not self._toggled_by_this_press and now - self._latch_down_at <= TAP_S:
+            self._last_tap_end = now
+
     def state(self) -> State:
-        buttons = 0
+        buttons = BUTTONS[LATCH_KEY] if self.latched else 0
         for code in self._held:
             buttons |= BUTTONS.get(code, 0)
         for axis in _AXES:
@@ -111,7 +142,11 @@ class KeyMapper:
         return State(buttons=buttons)
 
     def reset(self) -> State:
+        """Releases every key and the latch."""
         self._held.clear()
+        self.latched = False
+        self._last_tap_end = None
+        self._toggled_by_this_press = False
         return NEUTRAL
 
 

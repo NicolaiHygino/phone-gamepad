@@ -85,6 +85,72 @@ class KeyMapperTest(unittest.TestCase):
         self.assertEqual(self.m.state(), NEUTRAL)
 
 
+class ShootLatchTest(unittest.TestCase):
+    """A double tap on J holds shoot down, so the keyboard does not have to report J with the other keys."""
+
+    def setUp(self):
+        self.now = 0.0
+        self.m = KeyMapper(clock=lambda: self.now)
+
+    def tap(self, code=k.KEY_J, hold=0.05, gap=0.05):
+        self.m.key(code, DOWN)
+        self.now += hold
+        state = self.m.key(code, UP)
+        self.now += gap
+        return state
+
+    def test_double_tap_holds_shoot_after_the_key_lifts(self):
+        self.assertEqual(self.tap().buttons, 0)  # the first tap is an ordinary shot
+        self.assertFalse(self.m.latched)
+        self.assertEqual(self.m.key(k.KEY_J, DOWN).buttons, Btn.X)
+        self.assertTrue(self.m.latched)
+        self.assertEqual(self.m.key(k.KEY_J, UP).buttons, Btn.X)
+
+    def test_shoot_stays_held_while_moving_and_jumping(self):
+        self.tap()
+        self.tap()
+        self.assertEqual(self.m.key(k.KEY_D, DOWN).buttons, Btn.X | Btn.DPAD_RIGHT)
+        self.assertEqual(self.m.key(k.KEY_SPACE, DOWN).buttons, Btn.X | Btn.DPAD_RIGHT | Btn.A)
+
+    def test_another_double_tap_lets_go(self):
+        self.tap()
+        self.tap()
+        self.now += 1
+        self.tap()
+        self.assertEqual(self.m.key(k.KEY_J, DOWN).buttons, Btn.X)  # still down under the key
+        self.assertFalse(self.m.latched)
+        self.assertEqual(self.m.key(k.KEY_J, UP), NEUTRAL)
+
+    def test_a_third_quick_tap_does_not_undo_the_hold(self):
+        self.tap()
+        self.tap()
+        self.tap()
+        self.assertTrue(self.m.latched)
+
+    def test_a_slow_second_tap_does_not_latch(self):
+        self.tap(gap=k.DOUBLE_TAP_S + 0.01)
+        self.tap()
+        self.assertFalse(self.m.latched)
+
+    def test_a_long_first_press_does_not_latch(self):
+        self.tap(hold=k.TAP_S + 0.01)
+        self.tap()
+        self.assertFalse(self.m.latched)
+
+    def test_other_keys_do_not_latch(self):
+        self.tap(k.KEY_SPACE)
+        self.tap(k.KEY_SPACE)
+        self.assertFalse(self.m.latched)
+        self.assertEqual(self.m.state(), NEUTRAL)
+
+    def test_reset_drops_the_hold(self):
+        self.tap()
+        self.tap()
+        self.assertEqual(self.m.reset(), NEUTRAL)
+        self.assertFalse(self.m.latched)
+        self.assertEqual(self.m.state(), NEUTRAL)
+
+
 class FindKeyboardTest(unittest.TestCase):
     def test_a_path_that_matches_nothing_is_not_found(self):
         self.assertIsNone(k.find_keyboard("/dev/input/by-id/no-such-keyboard-*-event-kbd"))

@@ -133,6 +133,12 @@ When both keys of one direction are held (A and D, say), the one pressed last wi
 back to the other. If the keyboard disconnects or goes to sleep, every button is released and the
 keyboard is picked up again when it comes back.
 
+**Shooting while moving.** Many keyboards cannot report more than a few keys at once, so holding J can
+drop a movement or jump key. Double-tap J and shoot stays held down after you lift it; double-tap J again
+to let go. The timing is the same as on the phone: the first tap shorter than 250 ms, the second within
+300 ms of lifting, and a third quick tap does not undo the hold. The hold is dropped when the keyboard
+disconnects.
+
 The keyboard is found by its device name, which `--list` shows, or by its path under `/dev/input` (a glob
 is fine). A USB keyboard has a stable path in `/dev/input/by-id/`; a Bluetooth one does not, so use its
 name. Each keyboard needs its own `keypad.py` and becomes its own pad:

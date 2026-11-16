@@ -31,6 +31,8 @@ Xbox 360 controllers, so Steam, Proton and the game treat them like real pads.
 - **Adjustable layout:** button size, D-pad size and a swap-hands mode for left-handed play.
 - **Safe by default:** a phone that goes quiet (locked, out of range) releases all its buttons after half a
   second, so nothing stays held down.
+- **A keyboard as another pad:** a keyboard connected to the PC (the Bluetooth K380 here) can be one more
+  Xbox pad, with WASD to move and the right hand on J/K/L (see [Keyboard](#keyboard)).
 - **Optional shared key** so only your phones can play (see [Security](#security)).
 - **Starts with the game:** a Steam launch-option wrapper runs the server only while the game runs, so the
   virtual pads don't linger in other games.
@@ -110,6 +112,46 @@ finger from that second tap). Details:
 The captions follow Cuphead's default Xbox bindings. If you rebind buttons in the game, the labels (in
 `android/.../PadLayout.kt`) will not match, but the Xbox buttons underneath still work.
 
+## Keyboard
+
+`server/keypad.py` turns a keyboard connected to the PC into one more virtual Xbox 360 pad. While it runs
+it grabs the keyboard exclusively: the keyboard stops typing on the desktop and in the game (Cuphead also
+reads the keyboard itself, so otherwise each key would act twice) and desktop shortcuts on it stop working.
+
+| Key | Xbox | Cuphead default |
+|---|---|---|
+| W A S D, or the arrow keys | D-pad | move and aim, 8 directions |
+| Space | A | jump, menu confirm |
+| Left Shift | Y | dash |
+| J | X | shoot |
+| K | B | EX move, menu back |
+| L | RB | lock in place |
+| I | LB | switch weapon |
+| Esc or Enter | START | pause |
+
+When both keys of one direction are held (A and D, say), the one pressed last wins, and lifting it goes
+back to the other. If the keyboard disconnects or goes to sleep, every button is released and the
+keyboard is picked up again when it comes back.
+
+The keyboard is found by its device name, which `--list` shows, or by its path under `/dev/input` (a glob
+is fine). A USB keyboard has a stable path in `/dev/input/by-id/`; a Bluetooth one does not, so use its
+name. Each keyboard needs its own `keypad.py` and becomes its own pad:
+
+```sh
+python server/keypad.py --list
+python server/keypad.py "Keyboard K380 Keyboard"
+python server/keypad.py "/dev/input/by-id/usb-*-event-kbd"
+```
+
+Your user must be allowed to read the keyboard's input device. For the K380 over Bluetooth there is a
+udev rule (the file explains how to adapt it to another keyboard; for a USB keyboard, match
+`ATTRS{idVendor}` and `ATTRS{idProduct}` instead):
+
+```sh
+sudo cp scripts/70-keypad-k380.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=input
+```
+
 ## Start the server with a Steam game
 
 `scripts/padserver-run` starts the server when a game launches and stops it when the game exits. Link it
@@ -123,7 +165,13 @@ ln -s "$PWD/scripts/padserver-run" ~/.local/bin/padserver-run
 ```
 
 To chain it with another wrapper: `~/.local/bin/padserver-run ~/.local/bin/other-wrapper %command%`.
-Extra server arguments go in `PADSERVER_ARGS` (for example `PADSERVER_ARGS="--players 1"`), and the
+To also start keyboard pads, list the keyboards in `PADSERVER_KEYBOARD` (separate several with commas):
+
+```
+PADSERVER_KEYBOARD="Keyboard K380 Keyboard" ~/.local/bin/padserver-run %command%
+```
+
+Its output goes to `$XDG_RUNTIME_DIR/keypad.log`. Extra server arguments go in `PADSERVER_ARGS` (for example `PADSERVER_ARGS="--players 1"`), and the
 server's output is in `$XDG_RUNTIME_DIR/padserver.log`. Don't also run a server by hand: both want the
 same port.
 
@@ -155,9 +203,9 @@ designed for a home network, not the open internet. Details and limits are in [P
 ## Development
 
 ```
-server/      PC side: wire protocol, virtual pad (uinput), the server, a fake-phone tester, tests
+server/      PC side: wire protocol, virtual pad (uinput), the server, the keyboard pad, a fake-phone tester, tests
 android/     the app (Kotlin + Jetpack Compose), built with Gradle
-scripts/     padserver-run, the Steam launch-option wrapper
+scripts/     padserver-run, the Steam launch-option wrapper, and the udev rule for the K380
 PROTOCOL.md  the wire protocol: packets, discovery, the optional key
 ```
 
